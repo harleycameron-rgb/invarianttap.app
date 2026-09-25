@@ -133,6 +133,19 @@
     background:rgba(8,12,20,0.94);border:1px solid rgba(212,184,255,0.5);color:#e0ecff;
     padding:12px 18px;border-radius:10px;font:600 12px ui-monospace,'SF Mono',monospace;
     pointer-events:none;transition:opacity 0.2s;max-width:80vw;text-align:center;}
+
+  /* Slide-out panels: HUD sweeps left, lock panel sweeps right; an edge tab brings each back */
+  #hud,#factors{transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .35s;}
+  #hud.tucked{transform:translateX(calc(-100% - 14px)) scale(var(--ui-scale));opacity:.0;}
+  #factors.tucked{transform:translateX(calc(100% + 14px)) scale(var(--ui-scale));opacity:.0;}
+  .edge-tab{position:fixed;z-index:11;width:22px;height:64px;padding:0;
+    background:rgba(8,12,20,0.85);border:1px solid rgba(212,184,255,0.45);color:var(--moire);
+    font:600 13px 'SF Mono',monospace;cursor:pointer;backdrop-filter:blur(10px);
+    display:flex;align-items:center;justify-content:center;touch-action:manipulation;}
+  #tab-hud{left:0;top:40%;border-left:none;border-radius:0 10px 10px 0;}
+  #tab-factors{right:0;top:55%;border-right:none;border-radius:10px 0 0 10px;}
+  #hud{left:28px !important;} #factors{right:28px !important;}
+  .edge-tab:active{background:rgba(40,60,90,0.9);}
 </style>
 </head>
 <body>
@@ -188,6 +201,8 @@
 </div>
 
 <div id="factors"></div>
+<button id="tab-hud" class="edge-tab" aria-label="Toggle readout panel">‹</button>
+<button id="tab-factors" class="edge-tab" aria-label="Toggle lock panel">›</button>
 
 <div id="lockbar">
   <span>lock</span><span class="sep">·</span>
@@ -1854,6 +1869,23 @@ document.getElementById("btn-sight").addEventListener("click", () => {
   moireToast("Latitude " + Observer.lat.toFixed(1) + "° " + Latitude.hemi);
   slog("sight_pole", { lat_mdeg: S_milli(Observer.lat), hemi: Latitude.hemi, az_mdeg: S_milli(azDeg) });
 });
+
+/* Slide-out panels */
+function panelToggle(panelId, tabId, openGlyph, closedGlyph) {
+  const panel = document.getElementById(panelId), tab = document.getElementById(tabId);
+  const set = tucked => { panel.classList.toggle("tucked", tucked); tab.textContent = tucked ? closedGlyph : openGlyph; };
+  tab.addEventListener("click", () => { const t = !panel.classList.contains("tucked"); set(t); slog("panel:" + panelId, { open: !t }); });
+  // swipe the panel toward its edge to tuck it
+  let x0 = null;
+  panel.addEventListener("touchstart", e => { x0 = e.touches[0].clientX; }, { passive: true });
+  panel.addEventListener("touchend", e => {
+    if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null;
+    if ((panelId === "hud" && dx < -60) || (panelId === "factors" && dx > 60)) { set(true); slog("panel:" + panelId, { open: false, via: "swipe" }); }
+  }, { passive: true });
+  if (matchMedia("(max-width:700px)").matches) set(true); else set(false);   // start tucked on phones
+}
+panelToggle("hud", "tab-hud", "‹", "›");
+panelToggle("factors", "tab-factors", "›", "‹");
 
 /* Log export: JSONL + anchored head, verifiable with the Python CLI */
 document.getElementById("btn-log").addEventListener("click", async () => {
