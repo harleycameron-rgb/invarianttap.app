@@ -6,6 +6,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#05070c">
+<meta name="apple-mobile-web-app-title" content="InvariantTap">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
 <title>Moiré Pad · Sky Fused</title>
 <style>
   :root {
@@ -208,6 +212,7 @@
 </div>
 
 <script src="sentinel_dot.js"></script>
+<script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});</script>
 <script>
 "use strict";
 
