@@ -146,6 +146,28 @@
   #tab-factors{right:0;top:55%;border-right:none;border-radius:10px 0 0 10px;}
   #hud{left:28px !important;} #factors{right:28px !important;}
   .edge-tab:active{background:rgba(40,60,90,0.9);}
+
+  /* SOO pull-tab panel (bottom) */
+  #tab-soo{position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:12;
+    padding:4px 14px;border-radius:10px 10px 0 0;border:1px solid rgba(212,184,255,0.45);border-bottom:none;
+    background:rgba(8,12,20,0.88);color:var(--moire);font:600 10px 'SF Mono',monospace;letter-spacing:.12em;cursor:pointer;}
+  #soo-panel{position:fixed;left:50%;bottom:44px;z-index:13;width:min(560px,92vw);max-height:52vh;overflow:auto;
+    transform:translate(-50%,calc(100% + 60px));transition:transform .35s cubic-bezier(.2,.8,.2,1);
+    background:rgba(8,12,20,0.9);border:1px solid rgba(212,184,255,0.35);border-radius:12px;backdrop-filter:blur(12px);
+    padding:10px 12px;font:10px 'SF Mono',monospace;color:#b8d0ff;display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:4px 14px;}
+  #soo-panel.open{transform:translate(-50%,-26px);}
+  #soo-panel .soo-state{grid-column:1/-1;color:var(--dim);letter-spacing:.12em;text-transform:uppercase;}
+  #soo-panel .soo-state span{color:var(--moire);font-weight:600;} #soo-panel .ok{color:var(--ok)!important;} #soo-panel .bad{color:var(--bad)!important;}
+  #soo-panel .head{color:var(--dim);letter-spacing:.14em;text-transform:uppercase;font-size:9px;margin:6px 0 3px;border-top:1px solid rgba(120,180,255,0.12);padding-top:5px;}
+  #soo-panel .row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:2px 0;}
+  #soo-panel .k{color:var(--dim);font-size:9px;} #soo-panel .v{color:var(--text);}
+  #soo-panel input[type=range]{width:100%;accent-color:#d4b8ff;margin:0 0 3px;}
+  #soo-panel select{background:#0d1320;color:var(--text);border:1px solid rgba(120,180,255,.3);border-radius:4px;font:10px 'SF Mono',monospace;}
+  #soo-panel .eq{display:flex;gap:2px;height:56px;align-items:flex-end;}
+  #soo-panel .eq input{writing-mode:vertical-lr;direction:rtl;width:16px;height:52px;}
+  #lockbar{white-space:nowrap;max-width:96vw;overflow:hidden;text-overflow:ellipsis;}
+  #lb-chain.pulse{animation:sentpulse .6s ease-out;}
+  @keyframes sentpulse{0%{color:#7cff9b;text-shadow:0 0 8px #7cff9b;}100%{text-shadow:none;}}
 </style>
 </head>
 <body>
@@ -201,6 +223,8 @@
 </div>
 
 <div id="factors"></div>
+<div id="soo-panel"></div>
+<button id="tab-soo">SOO ▴</button>
 <button id="tab-hud" class="edge-tab" aria-label="Toggle readout panel">‹</button>
 <button id="tab-factors" class="edge-tab" aria-label="Toggle lock panel">›</button>
 
@@ -209,6 +233,7 @@
   <span class="hash" id="lb-hash">—</span><span class="sep">·</span>
   <span id="lb-pert">perturbation: —</span><span class="sep">·</span>
   <span id="lb-secular">secular: —</span><span class="sep">·</span>
+  <span>soo</span> <span class="hash" id="lb-soo">READY</span><span class="sep">·</span>
   <span>sentinel</span> <span class="hash" id="lb-chain">0 · 00000000</span>
 </div>
 
@@ -1917,6 +1942,247 @@ document.getElementById("btn-perm-no").addEventListener("click", () => {
   Audio2.init(); Audio2.resume();
   document.getElementById("permission").classList.add("hidden");
 });
+
+/* ============================================================================
+   SOO + SEXTANT-LOCK + CONTROL PANELS (woven)
+   Inputs are the app's real signals, in radians:
+     horizon = view altitude from daemon.viewLocal (0 without motion)
+     solar   = SolarFrame.alt
+     axis    = sighted latitude (= celestial pole altitude), 0 until sighted
+   vector.radius = |forward gate origin| / leash radius  (1.0 = at the leash)
+   Fixes vs. the draft block:
+     · ONSET→DRAG is time-based (no setTimeout queued every frame)
+     · drag no longer adds +0.6 radius per call (which failed in 2 frames);
+       dragStrength scales relocation (0.6 = unchanged behaviour)
+     · recovery actually moves the gate origin back, then re-arms READY
+     · snapToOrbit returns the corrected angle and a real lock test
+   ========================================================================== */
+const SOO = { state: "READY", orbitLocked: false, sextantLock: false,
+  horizonAngle: 0, solarAngle: 0, axisAngle: 0, orbitAngle: 0,
+  onsetAt: 0, downAt: 0, radius: 0 };
+const TimingPanel    = { tempo: 120, swing: 0.3, onsetBuffer: 350, tapWindow: 0.25, quantize: false };
+const SignalDynamics = { dragStrength: 0.6, perturbationNoise: 0.4, recoveryRate: 0.08 };
+const SynthEngine    = { droneWave: "sine", eq: [0.2, 0.4, 0.5, 0.3, 0.1, 0.2, 0.4],
+                         modulationDepth: 0.6, curvatureToPitch: true };
+const SextantPanel   = { horizonLock: true, solarBandPredict: true, axisSpine: true, curvatureMagnification: 1.8 };
+const VisualPanel    = { orbitView: true, perturbationField: true, sentinelPulse: true, solarBandOverlay: true };
+
+function sooSetState(s, why) {
+  if (SOO.state === s) return;
+  const from = SOO.state; SOO.state = s;
+  const fn = s === "FAILURE" ? sreject : slog;
+  if (s === "FAILURE") fn("soo:state", "escaped leash", { from, radius_milli: S_milli(SOO.radius) });
+  else fn("soo:state", { from, to: s, why: why || "" });
+}
+
+function sextantLock(horizon, solar, axis) {
+  const k = 0.15, gate = SignalDynamics.perturbationNoise * 0.01;   // noise gate (rad)
+  const ease = (cur, x) => Math.abs(x - cur) < gate ? cur : cur * (1 - k) + x * k;
+  SOO.horizonAngle = ease(SOO.horizonAngle, SextantPanel.horizonLock ? horizon : 0);
+  SOO.solarAngle   = ease(SOO.solarAngle,   SextantPanel.solarBandPredict ? solar : 0);
+  SOO.axisAngle    = ease(SOO.axisAngle,    SextantPanel.axisSpine ? axis : 0);
+  SOO.sextantLock = SextantPanel.horizonLock || SextantPanel.solarBandPredict || SextantPanel.axisSpine;
+}
+
+function snapToOrbit() {
+  if (!SOO.sextantLock) { SOO.orbitLocked = false; return SOO.orbitAngle; }
+  const target = SOO.solarAngle - SOO.horizonAngle;
+  SOO.orbitAngle += (target - SOO.orbitAngle) * 0.12;           // eased approach, no jitter
+  const was = SOO.orbitLocked;
+  SOO.orbitLocked = Math.abs(target - SOO.orbitAngle) < 0.01;
+  if (SOO.orbitLocked !== was) slog("soo:orbit", { locked: SOO.orbitLocked, angle_mrad: S_milli(SOO.orbitAngle) });
+  return SOO.orbitAngle;
+}
+
+function dragVector(now) {
+  if (SOO.state === "ONSET" && now - SOO.onsetAt >= TimingPanel.onsetBuffer) sooSetState("DRAG", "onset elapsed");
+  if (SOO.state === "DRAG" && SOO.radius > 1.0) sooSetState("FAILURE");
+}
+
+function recovery() {
+  if (SOO.state !== "FAILURE" && SOO.state !== "RECOVERY") return;
+  if (SOO.state === "FAILURE") sooSetState("RECOVERY", "pullback");
+  const k = 1 - SignalDynamics.recoveryRate;
+  for (const g of mirrorOn ? [GateF, GateM] : [GateF]) { g.originX *= k; g.originY *= k; }
+  if (SOO.radius <= 0.1) sooSetState("READY", "recovered");
+}
+
+function updateSOO(now) {
+  const v = daemon.viewLocal;
+  const horizon = v ? Math.asin(clamp(v.u, -1, 1)) : 0;
+  const axis = Observer.sighted ? Observer.lat * DEG : 0;
+  SOO.radius = Math.hypot(GateF.originX, GateF.originY) / leashMax();
+  sextantLock(horizon, SolarFrame.alt || 0, axis);
+  snapToOrbit();
+  dragVector(now);
+  recovery();
+}
+
+/* Pointer → SOO. ONSET suppresses gate firing (fixes the instant-escape jump). */
+canvas.addEventListener("pointerdown", () => {
+  if (SOO.state === "READY" || SOO.state === "TAP") {
+    SOO.onsetAt = SOO.downAt = performance.now(); sooSetState("ONSET", "pointerdown");
+  }
+});
+canvas.addEventListener("pointerup", () => {
+  const held = performance.now() - SOO.downAt;
+  if (SOO.state === "ONSET" && held <= TimingPanel.tapWindow * 1000) {
+    sooSetState("TAP", "short press"); setTimeout(() => { if (SOO.state === "TAP") sooSetState("READY", "tap done"); }, 120);
+  } else if (SOO.state === "ONSET" || SOO.state === "DRAG") sooSetState("READY", "release");
+});
+{
+  const tickF = GateF.tick.bind(GateF), tickM = GateM.tick.bind(GateM);
+  GateF.tick = function () { if (SOO.state !== "ONSET" && SOO.state !== "RECOVERY") tickF(); };
+  GateM.tick = function () { if (SOO.state !== "ONSET" && SOO.state !== "RECOVERY") tickM(); };
+}
+setInterval(() => updateSOO(performance.now()), 33);
+
+/* Drag strength scales relocation; 0.6 is neutral */
+{
+  const base = relocationOffset;
+  relocationOffset = function (a, c) {
+    const o = base(a, c), s = SignalDynamics.dragStrength / 0.6; return { dx: o.dx * s, dy: o.dy * s };
+  };
+}
+
+/* Synth: waveform, modulation depth, curvature→pitch, 7-band EQ on the master bus */
+const SOO_EQ_HZ = [60, 150, 400, 1000, 2400, 6000, 12000];
+let sooEq = null;
+function sooAudioWire() {
+  if (!Audio2.ctx || sooEq) return;
+  const c = Audio2.ctx;
+  sooEq = SOO_EQ_HZ.map((f, i) => { const b = c.createBiquadFilter();
+    b.type = i === 0 ? "lowshelf" : i === 6 ? "highshelf" : "peaking"; b.frequency.value = f; b.Q.value = 1.1; return b; });
+  Audio2.master.disconnect();
+  Audio2.master.connect(sooEq[0]);
+  for (let i = 0; i < 6; i++) sooEq[i].connect(sooEq[i + 1]);
+  sooEq[6].connect(c.destination);
+  sooAudioApply();
+}
+function sooAudioApply() {
+  if (sooEq) sooEq.forEach((b, i) => b.gain.value = (SynthEngine.eq[i] - 0.3) * 24);   // 0.3 = flat, ±~17 dB
+  Audio2.moireOsc.forEach(o => { o.type = SynthEngine.droneWave; });
+}
+{
+  const baseDrone = Audio2.updateDrone.bind(Audio2);
+  Audio2.updateDrone = function () {
+    sooAudioWire(); baseDrone();
+    if (!this.enabled || !this.ctx) return;
+    const t = this.ctx.currentTime, depth = SynthEngine.modulationDepth / 0.6;       // 0.6 = original depth
+    const c = (GateF.currentCoherence + GateM.currentCoherence) / 2;
+    const curv = SynthEngine.curvatureToPitch ? SOO.orbitAngle * SextantPanel.curvatureMagnification * 0.1 : 0;
+    const hz = 110 * (1 + c * 0.02 * depth) * (1 + curv);
+    const ratio = omegaB() / omegaA();
+    this.moireOsc.forEach((o, i) => { o.frequency.cancelScheduledValues(t);
+      o.frequency.linearRampToValueAtTime(i === 0 ? hz : hz * ratio, t + 0.12); });
+  };
+  /* Tempo/swing quantize ring tones to a swung 16th grid when enabled */
+  const baseTone = Audio2.ringTone.bind(Audio2);
+  Audio2.ringTone = function (ring) {
+    if (!TimingPanel.quantize || !this.ctx) return baseTone(ring);
+    const step = 60 / TimingPanel.tempo / 4, t = this.ctx.currentTime;
+    let n = Math.ceil(t / step), at = n * step;
+    if (n % 2) at += step * TimingPanel.swing;
+    setTimeout(() => baseTone(ring), Math.max(0, (at - t) * 1000));
+  };
+}
+
+/* Visual overlays (drawn on top of the pad each frame) */
+function drawSOO() {
+  const w = canvas.width, h = canvas.height, cx = w / 2, cy = h / 2, R = Math.min(w, h) * 0.42;
+  const dpr = 1;   // canvas is in CSS px
+  ctx.save();
+  if (VisualPanel.perturbationField) {
+    const r = leashMax() * dpr, t = clamp(SOO.radius, 0, 1.2);
+    ctx.strokeStyle = SOO.state === "FAILURE" || SOO.state === "RECOVERY" ? "rgba(255,112,112,0.55)" : `rgba(142,197,255,${0.08 + t * 0.3})`;
+    ctx.setLineDash([3 * dpr, 7 * dpr]); ctx.lineWidth = 1 * dpr;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (VisualPanel.solarBandOverlay) {
+    const a = -SOO.solarAngle - Math.PI / 2;
+    ctx.strokeStyle = "rgba(255,212,132,0.35)"; ctx.lineWidth = 6 * dpr;
+    ctx.beginPath(); ctx.arc(cx, cy, R * 1.04, a - 0.12, a + 0.12); ctx.stroke();
+  }
+  if (VisualPanel.orbitView) {
+    const a = -SOO.orbitAngle * SextantPanel.curvatureMagnification - Math.PI / 2;
+    ctx.strokeStyle = SOO.orbitLocked ? "rgba(124,255,155,0.8)" : "rgba(212,184,255,0.6)";
+    ctx.lineWidth = 2 * dpr; ctx.beginPath(); ctx.arc(cx, cy, R * 0.92, a - 0.25, a + 0.25); ctx.stroke();
+    ctx.fillStyle = ctx.strokeStyle; ctx.beginPath();
+    ctx.arc(cx + Math.cos(a) * R * 0.92, cy + Math.sin(a) * R * 0.92, 3.5 * dpr, 0, TAU); ctx.fill();
+    if (SextantPanel.axisSpine && SOO.axisAngle) {
+      const s = -SOO.axisAngle - Math.PI / 2;
+      ctx.strokeStyle = "rgba(142,255,255,0.35)"; ctx.lineWidth = 1 * dpr; ctx.beginPath();
+      ctx.moveTo(cx - Math.cos(s) * R * 0.3, cy - Math.sin(s) * R * 0.3); ctx.lineTo(cx + Math.cos(s) * R, cy + Math.sin(s) * R); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+{
+  const baseReticle = drawReticle;
+  drawReticle = function () { drawSOO(); baseReticle(); };
+}
+{
+  const baseAppend = Sentinel.onAppend;
+  Sentinel.onAppend = e => { baseAppend(e);
+    if (!VisualPanel.sentinelPulse) return;
+    const el = document.getElementById("lb-chain"); if (!el) return;
+    el.classList.remove("pulse"); void el.offsetWidth; el.classList.add("pulse"); };
+}
+
+/* Pull-tab control panel (bottom) */
+const SooUI = {
+  build() {
+    const root = document.getElementById("soo-panel");
+    const sections = [
+      ["Timing", TimingPanel, { tempo: [40, 240, 1], swing: [0, 0.75, 0.01], onsetBuffer: [0, 1000, 10], tapWindow: [0.05, 0.6, 0.01] }],
+      ["Signal dynamics", SignalDynamics, { dragStrength: [0.1, 1.5, 0.01], perturbationNoise: [0, 1, 0.01], recoveryRate: [0.01, 0.3, 0.01] }],
+      ["Synth engine", SynthEngine, { modulationDepth: [0, 1.5, 0.01] }],
+      ["Sextant", SextantPanel, { curvatureMagnification: [0.5, 4, 0.1] }],
+      ["Visual", VisualPanel, {}],
+    ];
+    const h = [`<div class="soo-state">SOO <span id="soo-st">READY</span> · orbit <span id="soo-orb">—</span></div>`];
+    for (const [title, obj, ranges] of sections) {
+      h.push(`<div class="sec"><div class="head">${title}</div>`);
+      for (const [k, v] of Object.entries(obj)) {
+        const id = `soo-${title[0]}-${k}`;
+        if (typeof v === "boolean") h.push(`<label class="row"><span class="k">${k}</span><input type="checkbox" id="${id}" ${v ? "checked" : ""}></label>`);
+        else if (k === "droneWave") h.push(`<label class="row"><span class="k">${k}</span><select id="${id}">${["sine", "triangle", "square", "sawtooth"].map(o => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select></label>`);
+        else if (k === "eq") h.push(`<div class="row"><span class="k">eq</span></div><div class="eq">${v.map((x, i) => `<input type="range" class="eqb" orient="vertical" id="${id}-${i}" min="0" max="1" step="0.01" value="${x}" title="${SOO_EQ_HZ[i]} Hz">`).join("")}</div>`);
+        else if (ranges[k]) { const [a, b, s] = ranges[k];
+          h.push(`<div class="row"><span class="k">${k}</span><span class="v" id="${id}-v">${v}</span></div><input type="range" id="${id}" min="${a}" max="${b}" step="${s}" value="${v}">`); }
+      }
+      h.push(`</div>`);
+    }
+    root.innerHTML = h.join("");
+    for (const [title, obj] of sections) for (const k of Object.keys(obj)) {
+      const id = `soo-${title[0]}-${k}`, log = (value) => { clearTimeout(SooUI._t[id]);
+        SooUI._t[id] = setTimeout(() => slog("soo:set", { panel: title, key: k, value: String(value) }), 400); };
+      if (k === "eq") obj.eq.forEach((_, i) => document.getElementById(`${id}-${i}`).addEventListener("input", e => {
+        obj.eq[i] = parseFloat(e.target.value); sooAudioApply(); log(obj.eq.join(",")); }));
+      const el = document.getElementById(id); if (!el) continue;
+      el.addEventListener(el.type === "checkbox" || el.tagName === "SELECT" ? "change" : "input", () => {
+        const val = el.type === "checkbox" ? el.checked : el.tagName === "SELECT" ? el.value : parseFloat(el.value);
+        obj[k] = val; const out = document.getElementById(id + "-v"); if (out) out.textContent = val;
+        sooAudioApply(); log(val);
+      });
+    }
+  },
+  _t: {},
+  status() {
+    const s = document.getElementById("soo-st"), o = document.getElementById("soo-orb");
+    if (s) { s.textContent = SOO.state; s.className = SOO.state === "FAILURE" || SOO.state === "RECOVERY" ? "bad" : SOO.state === "READY" ? "ok" : ""; }
+    if (o) o.textContent = SOO.orbitLocked ? "locked" : (SOO.orbitAngle * RAD).toFixed(1) + "°";
+    const lb = document.getElementById("lb-soo"); if (lb) lb.textContent = SOO.state;
+  },
+};
+SooUI.build();
+setInterval(() => SooUI.status(), 150);
+{
+  const p = document.getElementById("soo-panel"), t = document.getElementById("tab-soo");
+  const set = open => { p.classList.toggle("open", open); t.textContent = open ? "SOO ▾" : "SOO ▴"; };
+  t.addEventListener("click", () => { const o = !p.classList.contains("open"); set(o); slog("panel:soo", { open: o }); });
+  set(false);
+}
 
 /* Ring → audio */
 const logRing = r => slog("ring", { gate: r.mirrored ? "mirror" : "forward", id: r.id, parent: r.parentId,

@@ -59,3 +59,14 @@ pytest -q tests
 ## Changes vs. the uploaded build
 
 - Fixed a pre-existing crash: `phase_A` / `phase_B` read `slice[0].x` on an empty slice when `findConvergence` probed plane 0, throwing on every gate tick early in a drag. Both now return 0 for slices shorter than 3 samples.
+
+## SOO + Sextant-Lock
+
+A bottom pull-tab (**SOO ▴**) opens the SOO control panels: Timing, Signal dynamics, Synth engine, Sextant, Visual.
+
+- **State machine** `READY → ONSET → DRAG → FAILURE → RECOVERY → READY` (plus `TAP` for presses shorter than `tapWindow`). ONSET holds gate firing for `onsetBuffer` ms, which stops the instant-escape jump on touch. FAILURE triggers when the forward origin passes the leash radius; RECOVERY pulls the origins back by `recoveryRate` per tick and re-arms at 10% of the leash.
+- **Sextant-lock** eases three real inputs: horizon (view altitude), solar (sun altitude), axis (sighted latitude). `perturbationNoise` is a noise gate on those inputs. **Snap-to-orbit** eases toward `solar − horizon` and reports a lock within 0.01 rad.
+- **Synth**: drone waveform, modulation depth, curvature→pitch, a 7-band EQ on the master bus (0.3 = flat), and optional tempo/swing quantize of ring tones.
+- **Visual**: orbit arc, leash field, solar-band marker, sentinel pulse on each new log entry.
+- Every state change, orbit lock and panel edit is written to the sentinel_dot chain; FAILURE is logged as a rejection.
+- Defaults (dragStrength 0.6, modulationDepth 0.6, quantize off) leave the original pad behaviour unchanged.
