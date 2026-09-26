@@ -76,3 +76,11 @@ Zooms the view out to 0.3× over 0.7 s so the whole walk, leash and orbit are in
 
 ### Drum kits
 Kick fires once per ONSET (not every frame). Kits: Analog808, DeepHouse, TechnoHard, MinimalSoft. Axis (latitude) → pitch, horizon → decay, solar → drive; 4× pitch sweep in 45 ms, tanh drive, 4 ms high-passed noise click. Routed through the master EQ. Logged as `soo:kick`.
+
+### Drum mode + pattern engine
+- **Drum mode** toggle gates the whole kit (onset kick, sequencer, noise).
+- **16-step sequencer** on a look-ahead Web Audio clock at `tempo`, 16ths, `swing` on odd steps. Pattern hits play the current kit's kick at the pattern volume.
+- **Orbital snap shuffle**: when the orbit lock goes false→true, or Snap to Orbit is pressed, the pattern reshuffles (30% density, downbeat kept). Each new pattern is logged as a 16-char string, so any groove can be rebuilt from the log.
+- **Fingertip draw**: with Fingertip on, the pad is a clock face — drawing around it writes steps (12 o'clock = step 1, clockwise). The 16-step ring is drawn on the pad with the playhead lit.
+- **Baseline noise**: a quantised high-passed noise tick every step, amplitude following |sin| over `baselineQuantise` steps.
+- **Volume dials**: kick (onset), noise, pattern — drag up/down or scroll.

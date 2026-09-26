@@ -180,6 +180,16 @@
   body.in-use #tab-soo{transform:translate(-50%,300%);opacity:0;}
   body.in-use #controls button:not(#btn-reset):not(#btn-snap){transform:translateY(-160%);opacity:0;pointer-events:none;}
   body.in-use #hud,body.in-use #factors,body.in-use #legend,body.in-use #lockbar,body.in-use #soo-panel,body.in-use .edge-tab,body.in-use #tab-soo{pointer-events:none;}
+  #soo-panel .drow{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:2px 14px;}
+  #soo-panel .knobs{display:flex;gap:18px;margin:6px 0;}
+  #soo-panel .knob{display:flex;flex-direction:column;align-items:center;cursor:ns-resize;touch-action:none;width:48px;}
+  #soo-panel .knob svg{width:40px;height:40px;} #soo-panel .knob .kb{fill:#0d1320;stroke:rgba(120,180,255,.25);stroke-width:2;}
+  #soo-panel .knob .ka{fill:none;stroke:#d4b8ff;stroke-width:3;stroke-linecap:round;} #soo-panel .knob .kn{stroke:#e0ecff;stroke-width:2;stroke-linecap:round;}
+  #soo-panel .mini{background:#0d1320;color:var(--moire);border:1px solid rgba(212,184,255,.4);border-radius:4px;font:9px 'SF Mono',monospace;padding:2px 6px;cursor:pointer;}
+  #pat-grid{display:grid;grid-template-columns:repeat(16,1fr);gap:2px;margin-top:4px;}
+  #pat-grid button{height:22px;padding:0;background:#0d1320;border:1px solid rgba(120,180,255,.2);border-radius:3px;color:var(--dim);font:8px 'SF Mono',monospace;cursor:pointer;}
+  #pat-grid button:nth-child(4n+1){border-color:rgba(120,180,255,.45);}
+  #pat-grid button.on{background:rgba(212,184,255,.45);color:#fff;} #pat-grid button.head{box-shadow:inset 0 0 0 1px #7cff9b;}
   #lb-chain.pulse{animation:sentpulse .6s ease-out;}
   @keyframes sentpulse{0%{color:#7cff9b;text-shadow:0 0 8px #7cff9b;}100%{text-shadow:none;}}
 </style>
@@ -2006,6 +2016,8 @@ function snapToOrbit() {
   const was = SOO.orbitLocked;
   SOO.orbitLocked = Math.abs(target - SOO.orbitAngle) < 0.01;
   if (SOO.orbitLocked !== was) slog("soo:orbit", { locked: SOO.orbitLocked, angle_mrad: S_milli(SOO.orbitAngle) });
+  SOO.orbitSnapEvent = !was && SOO.orbitLocked;
+  if (SOO.orbitSnapEvent && typeof shufflePattern === "function" && DrumMode.enabled) shufflePattern("orbital snap");
   return SOO.orbitAngle;
 }
 
@@ -2151,53 +2163,6 @@ const DrumKits = {
   TechnoHard:  { pitch: 60, decay: 0.30, drive: 0.55, click: 0.20 },
   MinimalSoft: { pitch: 40, decay: 0.80, drive: 0.10, click: 0.02 },
 };
-const DrumPanel = { kit: "Analog808", kick: true, level: 0.8 };
-const _driveCurves = {};
-function driveCurve(d) {
-  const k = Math.round(d * 100); if (_driveCurves[k]) return _driveCurves[k];
-  const n = 1024, c = new Float32Array(n), a = 1 + d * 30;
-  for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(a * x) / Math.tanh(a); }
-  return (_driveCurves[k] = c);
-}
-function playKick(velocity = 1.0) {
-  const kit = DrumKits[DrumPanel.kit];
-  const pitch = Math.max(20, kit.pitch + SOO.axisAngle * 12);            // curvature (axis) → pitch
-  const decay = clamp(kit.decay + SOO.horizonAngle * 0.1, 0.08, 2);      // horizon → decay
-  const drive = clamp(kit.drive + SOO.solarAngle * 0.2, 0, 1);           // solar → distortion
-  const click = kit.click;
-  const out = { type: "kick", kit: DrumPanel.kit, pitch, decay, drive, click, velocity };
-  if (!DrumPanel.kick || !Audio2.ctx) return out;
-  const c = Audio2.ctx, t = c.currentTime + 0.005, v = velocity * DrumPanel.level;
-  const osc = c.createOscillator(), g = c.createGain(), sh = c.createWaveShaper();
-  osc.type = "sine";
-  osc.frequency.setValueAtTime(pitch * 4, t);
-  osc.frequency.exponentialRampToValueAtTime(pitch, t + 0.045);           // pitch sweep = the "punch"
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(v, t + 0.004);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
-  sh.curve = driveCurve(drive); sh.oversample = "2x";
-  osc.connect(sh); sh.connect(g); g.connect(Audio2.master);
-  osc.start(t); osc.stop(t + decay + 0.05);
-  if (click > 0) {                                                        // transient click: 4 ms noise burst
-    const len = Math.floor(c.sampleRate * 0.004), buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
-    const src = c.createBufferSource(), hp = c.createBiquadFilter(), cg = c.createGain();
-    src.buffer = buf; hp.type = "highpass"; hp.frequency.value = 2500; cg.gain.value = click * v * 4;
-    src.connect(hp); hp.connect(cg); cg.connect(Audio2.master); src.start(t);
-  }
-  return out;
-}
-{
-  const base = sooSetState;
-  sooSetState = function (s, why) {
-    const was = SOO.state; base(s, why);
-    if (s === "ONSET" && was !== "ONSET") {
-      const k = playKick(SignalDynamics.dragStrength / 0.6 > 1 ? 1 : SignalDynamics.dragStrength / 0.6);
-      if (DrumPanel.kick) slog("soo:kick", { kit: k.kit, pitch_mhz: S_milli(k.pitch), decay_ms: S_milli(k.decay), drive_milli: S_milli(k.drive) });
-    }
-  };
-}
-
 /* Pull-tab control panel (bottom) */
 const SooUI = {
   build() {
@@ -2208,7 +2173,6 @@ const SooUI = {
       ["Synth engine", SynthEngine, { modulationDepth: [0, 1.5, 0.01] }],
       ["Sextant", SextantPanel, { curvatureMagnification: [0.5, 4, 0.1] }],
       ["Visual", VisualPanel, {}],
-      ["Drum kit", DrumPanel, { level: [0, 1, 0.01] }],
     ];
     const h = [`<div class="soo-state">SOO <span id="soo-st">READY</span> · orbit <span id="soo-orb">—</span></div>`];
     for (const [title, obj, ranges] of sections) {
@@ -2255,6 +2219,179 @@ setInterval(() => SooUI.status(), 150);
 }
 
 /* Snap to Orbit: lock the orbit onto the sextant target now and pull the gates home */
+const DrumMode = { enabled: true, baselineQuantise: 16, noiseLevel: 0.3, onsetKick: true };
+const DrumPanel = { kit: "Analog808" };                     // CurrentKit
+const Volume = { kick: 0.9, noise: 0.4, pattern: 0.8 };
+const _driveCurves = {};
+function driveCurve(d) {
+  const k = Math.round(d * 100); if (_driveCurves[k]) return _driveCurves[k];
+  const n = 1024, c = new Float32Array(n), a = 1 + d * 30;
+  for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(a * x) / Math.tanh(a); }
+  return (_driveCurves[k] = c);
+}
+function playKick(velocity = 1.0, when = null) {
+  if (!DrumMode.enabled) return null;
+  const kit = DrumKits[DrumPanel.kit];
+  const pitch = Math.max(20, kit.pitch + SOO.axisAngle * 12);            // curvature (axis) → pitch
+  const decay = clamp(kit.decay + SOO.horizonAngle * 0.1, 0.08, 2);      // horizon → decay
+  const drive = clamp(kit.drive + SOO.solarAngle * 0.2, 0, 1);           // solar → distortion
+  const click = kit.click;
+  const out = { type: "kick", kit: DrumPanel.kit, pitch, decay, drive, click, velocity };
+  if (!Audio2.ctx || velocity <= 0) return out;
+  const c = Audio2.ctx, t = when ?? c.currentTime + 0.005, v = Math.max(0.0002, velocity);
+  const osc = c.createOscillator(), g = c.createGain(), sh = c.createWaveShaper();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(pitch * 4, t);
+  osc.frequency.exponentialRampToValueAtTime(pitch, t + 0.045);           // pitch sweep = the "punch"
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(v, t + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+  sh.curve = driveCurve(drive); sh.oversample = "2x";
+  osc.connect(sh); sh.connect(g); g.connect(Audio2.master);
+  osc.start(t); osc.stop(t + decay + 0.05);
+  if (click > 0) noiseBurst(t, 0.004, 2500, click * v * 4);
+  return out;
+}
+function noiseBurst(t, dur, hpHz, gain) {
+  const c = Audio2.ctx, len = Math.max(1, Math.floor(c.sampleRate * dur));
+  const buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+  const src = c.createBufferSource(), hp = c.createBiquadFilter(), g = c.createGain();
+  src.buffer = buf; hp.type = "highpass"; hp.frequency.value = hpHz; g.gain.value = gain;
+  src.connect(hp); hp.connect(g); g.connect(Audio2.master); src.start(t);
+}
+/* Underlying instrument noise, quantised: amplitude follows |sin| over a q-step cycle */
+function baselineNoise(stepIndex) {
+  const q = DrumMode.baselineQuantise, phase = (stepIndex % q) / q;
+  const value = DrumMode.noiseLevel * Math.sin(phase * TAU);
+  return { type: "baseline-noise", value: value * Volume.noise };
+}
+
+/* Pattern engine: 16 steps. Orbital snap (lock false→true, or the Snap button) shuffles it;
+   the fingertip draws into it — the pad is a clock face, 12 o'clock = step 1. */
+const Pattern = [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0];
+function patternStr() { return Pattern.join(""); }
+function shufflePattern(via) {
+  for (let i = 0; i < Pattern.length; i++) Pattern[i] = Math.random() < 0.3 ? 1 : 0;
+  Pattern[0] = 1;                                           // keep the downbeat so it never goes silent
+  slog("soo:pattern", { via, pattern: patternStr() });
+  PatternUI.render();
+}
+let _drawStep = -1, _drawLogT = null;
+function drawToPattern(clientX, clientY) {
+  const r = canvas.getBoundingClientRect(), x = clientX - r.left - r.width / 2, y = clientY - r.top - r.height / 2;
+  if (Math.hypot(x, y) < 30) return;
+  const a = (Math.atan2(y, x) + Math.PI / 2 + TAU) % TAU;   // 0 at 12 o'clock, clockwise
+  const i = Math.floor(a / TAU * Pattern.length) % Pattern.length;
+  if (i === _drawStep) return; _drawStep = i;
+  if (!Pattern[i]) { Pattern[i] = 1; PatternUI.render();
+    clearTimeout(_drawLogT); _drawLogT = setTimeout(() => slog("soo:pattern", { via: "fingertip", pattern: patternStr() }), 500); }
+}
+let stepCounter = 0;
+const Seq = { next: 0, step: 0, playhead: -1, timer: null };
+function seqTick() {
+  const c = Audio2.ctx;
+  if (!DrumMode.enabled || !c || c.state !== "running") { Seq.next = 0; return; }
+  const dur = 60 / TimingPanel.tempo / 4;
+  if (Seq.next < c.currentTime) Seq.next = c.currentTime + 0.05;
+  while (Seq.next < c.currentTime + 0.12) {
+    const s = stepCounter % Pattern.length, t = Seq.next + (s % 2 ? dur * TimingPanel.swing : 0);
+    if (Pattern[s]) playKick(Volume.pattern, t);
+    const n = baselineNoise(stepCounter);
+    if (Volume.noise > 0 && DrumMode.noiseLevel > 0) noiseBurst(t, 0.03, 7000, Math.abs(n.value) * 0.6 + 0.02 * Volume.noise);
+    const at = (t - c.currentTime) * 1000;
+    setTimeout(() => { Seq.playhead = s; PatternUI.head(s); }, Math.max(0, at));
+    stepCounter++; Seq.next += dur;
+  }
+}
+setInterval(seqTick, 25);
+
+{
+  const base = sooSetState;
+  sooSetState = function (s, why) {
+    const was = SOO.state; base(s, why);
+    if (s === "ONSET" && was !== "ONSET" && DrumMode.onsetKick) {
+      const k = playKick(Math.min(1, SignalDynamics.dragStrength / 0.6) * Volume.kick);
+      if (k) slog("soo:kick", { kit: k.kit, pitch_mhz: S_milli(k.pitch), decay_ms: S_milli(k.decay), drive_milli: S_milli(k.drive) });
+    }
+  };
+}
+canvas.addEventListener("pointerdown", e => { _drawStep = -1; if (showFingertip && DrumMode.enabled) drawToPattern(e.clientX, e.clientY); });
+canvas.addEventListener("pointermove", e => { if (e.buttons && showFingertip && DrumMode.enabled) drawToPattern(e.clientX, e.clientY); });
+
+/* Volume dials + pattern grid (appended to the SOO panel) */
+const PatternUI = {
+  render() {
+    const g = document.getElementById("pat-grid"); if (!g) return;
+    g.querySelectorAll("button").forEach((b, i) => b.classList.toggle("on", !!Pattern[i]));
+  },
+  head(s) { const g = document.getElementById("pat-grid"); if (!g) return;
+    g.querySelectorAll("button").forEach((b, i) => b.classList.toggle("head", i === s)); },
+};
+function knob(id, label, obj, key) {
+  return `<div class="knob" id="${id}" data-key="${key}"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="15" class="kb"/><path class="ka"/><line x1="20" y1="20" x2="20" y2="7" class="kn"/></svg><span class="k">${label}</span><span class="v"></span></div>`;
+}
+function wireKnob(el, obj, key) {
+  const arc = el.querySelector(".ka"), nd = el.querySelector(".kn"), out = el.querySelector(".v");
+  const paint = () => { const v = obj[key], a0 = -135, a = a0 + 270 * v, rad = d => (d - 90) * DEG;
+    const p = d => `${20 + 15 * Math.cos(rad(d))} ${20 + 15 * Math.sin(rad(d))}`;
+    arc.setAttribute("d", `M ${p(a0)} A 15 15 0 ${270 * v > 180 ? 1 : 0} 1 ${p(a)}`);
+    nd.setAttribute("transform", `rotate(${a} 20 20)`); out.textContent = Math.round(v * 100); };
+  let y0 = null, v0 = 0, lt = null;
+  el.addEventListener("pointerdown", e => { y0 = e.clientY; v0 = obj[key]; el.setPointerCapture(e.pointerId); e.stopPropagation(); });
+  el.addEventListener("pointermove", e => { if (y0 === null) return; obj[key] = clamp(v0 + (y0 - e.clientY) / 120, 0, 1); paint();
+    clearTimeout(lt); lt = setTimeout(() => slog("soo:volume", { channel: key, value: obj[key].toFixed(2) }), 400); });
+  el.addEventListener("pointerup", () => { y0 = null; });
+  el.addEventListener("wheel", e => { e.preventDefault(); obj[key] = clamp(obj[key] - e.deltaY / 1000, 0, 1); paint(); }, { passive: false });
+  paint();
+}
+{
+  const root = document.getElementById("soo-panel"), sec = document.createElement("div");
+  sec.className = "sec drum"; sec.style.gridColumn = "1/-1";
+  sec.innerHTML = `<div class="head">Drum mode</div>
+    <div class="drow">
+      <label class="row"><span class="k">enabled</span><input type="checkbox" id="dm-en" ${DrumMode.enabled ? "checked" : ""}></label>
+      <label class="row"><span class="k">kit</span><select id="dm-kit">${Object.keys(DrumKits).map(k => `<option ${k === DrumPanel.kit ? "selected" : ""}>${k}</option>`).join("")}</select></label>
+      <label class="row"><span class="k">onset kick</span><input type="checkbox" id="dm-ok" ${DrumMode.onsetKick ? "checked" : ""}></label>
+      <label class="row"><span class="k">quantise</span><select id="dm-q">${[4, 8, 16, 32].map(q => `<option ${q === DrumMode.baselineQuantise ? "selected" : ""}>${q}</option>`).join("")}</select></label>
+    </div>
+    <div class="row"><span class="k">noiseLevel</span><span class="v" id="dm-nl-v">${DrumMode.noiseLevel}</span></div>
+    <input type="range" id="dm-nl" min="0" max="1" step="0.01" value="${DrumMode.noiseLevel}">
+    <div class="knobs">${knob("vk-kick", "kick")}${knob("vk-noise", "noise")}${knob("vk-pattern", "pattern")}</div>
+    <div class="row"><span class="k">pattern · snap to shuffle · draw on the pad (Fingertip on)</span><button id="pat-clear" class="mini">clear</button><button id="pat-shuf" class="mini">shuffle</button></div>
+    <div id="pat-grid">${Pattern.map((_, i) => `<button data-i="${i}">${i + 1}</button>`).join("")}</div>`;
+  root.appendChild(sec);
+  const L = (k, v) => slog("soo:set", { panel: "Drum mode", key: k, value: String(v) });
+  document.getElementById("dm-en").onchange = e => { DrumMode.enabled = e.target.checked; L("enabled", DrumMode.enabled); };
+  document.getElementById("dm-ok").onchange = e => { DrumMode.onsetKick = e.target.checked; L("onsetKick", DrumMode.onsetKick); };
+  document.getElementById("dm-kit").onchange = e => { DrumPanel.kit = e.target.value; L("kit", DrumPanel.kit); };
+  document.getElementById("dm-q").onchange = e => { DrumMode.baselineQuantise = +e.target.value; L("baselineQuantise", DrumMode.baselineQuantise); };
+  let nt = null;
+  document.getElementById("dm-nl").oninput = e => { DrumMode.noiseLevel = +e.target.value; document.getElementById("dm-nl-v").textContent = DrumMode.noiseLevel;
+    clearTimeout(nt); nt = setTimeout(() => L("noiseLevel", DrumMode.noiseLevel), 400); };
+  for (const k of ["kick", "noise", "pattern"]) wireKnob(document.getElementById("vk-" + k), Volume, k);
+  document.getElementById("pat-grid").onclick = e => { const b = e.target.closest("button"); if (!b) return;
+    const i = +b.dataset.i; Pattern[i] = Pattern[i] ? 0 : 1; PatternUI.render(); slog("soo:pattern", { via: "grid", pattern: patternStr() }); };
+  document.getElementById("pat-clear").onclick = () => { Pattern.fill(0); PatternUI.render(); slog("soo:pattern", { via: "clear", pattern: patternStr() }); };
+  document.getElementById("pat-shuf").onclick = () => shufflePattern("button");
+  PatternUI.render();
+}
+
+/* Pattern ring on the pad: 16 steps around the clock face, playhead lit */
+{
+  const baseSOO = drawSOO;
+  drawSOO = function () { baseSOO();
+    if (!DrumMode.enabled) return;
+    const w = canvas.width, h = canvas.height, cx = w / 2, cy = h / 2, R = Math.min(w, h) * 0.42 * 0.8;
+    for (let i = 0; i < Pattern.length; i++) {
+      const a = i / Pattern.length * TAU - Math.PI / 2, x = cx + Math.cos(a) * R, y = cy + Math.sin(a) * R;
+      const on = Pattern[i], hd = i === Seq.playhead;
+      ctx.fillStyle = hd ? (on ? "rgba(124,255,155,0.95)" : "rgba(212,184,255,0.5)") : on ? "rgba(212,184,255,0.75)" : "rgba(120,140,180,0.18)";
+      ctx.beginPath(); ctx.arc(x, y, on ? 5 : 2.5, 0, TAU); ctx.fill();
+    }
+  };
+}
+
 /* Snap to Orbit = perspective: zoom out to orbit, then a descent gradient home.
    Phase 1 (0.7 s): view zooms out to 0.3× — the whole walk, leash and orbit in frame.
    Phase 2 (3.2 s): smooth descent — zoom eases back to 1×, gate origins glide to home
@@ -2268,6 +2405,7 @@ function snapToOrbitNow(via) {
   Descent.from = [GateF, GateM].map(g => [g.originX, g.originY]);
   SOO.state = "FAILURE"; sooSetState("RECOVERY", "snap to orbit · descent");
   slog("soo:snap", { via, angle_mrad: S_milli(target), radius_milli: S_milli(SOO.radius) });
+  if (DrumMode.enabled) shufflePattern("snap to orbit");
   moireToast("Orbit · descending home");
 }
 function descentStep(now) {
