@@ -166,6 +166,20 @@
   #soo-panel .eq{display:flex;gap:2px;height:56px;align-items:flex-end;}
   #soo-panel .eq input{writing-mode:vertical-lr;direction:rtl;width:16px;height:52px;}
   #lockbar{white-space:nowrap;max-width:96vw;overflow:hidden;text-overflow:ellipsis;}
+  #controls button#btn-snap{border-color:rgba(124,255,155,0.6);color:var(--ok);}
+  #controls button#btn-snap.locked{background:rgba(124,255,155,0.18);}
+  /* In use: everything snaps off screen except Reset + Snap to Orbit */
+  #hud,#factors,#legend,#lockbar,#soo-panel,.edge-tab,#tab-soo,#controls button{transition:transform .3s cubic-bezier(.2,.8,.2,1),opacity .3s;}
+  body.in-use #hud{transform:translateX(calc(-100% - 40px)) !important;opacity:0;}
+  body.in-use #legend{transform:translateX(calc(-100% - 40px)) !important;opacity:0;}
+  body.in-use #factors{transform:translateX(calc(100% + 40px)) !important;opacity:0;}
+  body.in-use #tab-hud{transform:translateX(-100%);opacity:0;}
+  body.in-use #tab-factors{transform:translateX(100%);opacity:0;}
+  body.in-use #lockbar{transform:translate(-50%,200%) !important;opacity:0;}
+  body.in-use #soo-panel{transform:translate(-50%,calc(100% + 120px)) !important;}
+  body.in-use #tab-soo{transform:translate(-50%,300%);opacity:0;}
+  body.in-use #controls button:not(#btn-reset):not(#btn-snap){transform:translateY(-160%);opacity:0;pointer-events:none;}
+  body.in-use #hud,body.in-use #factors,body.in-use #legend,body.in-use #lockbar,body.in-use #soo-panel,body.in-use .edge-tab,body.in-use #tab-soo{pointer-events:none;}
   #lb-chain.pulse{animation:sentpulse .6s ease-out;}
   @keyframes sentpulse{0%{color:#7cff9b;text-shadow:0 0 8px #7cff9b;}100%{text-shadow:none;}}
 </style>
@@ -204,6 +218,7 @@
 
 <div id="controls">
   <button id="btn-reset" class="danger">Reset</button>
+  <button id="btn-snap" class="snap">Snap to Orbit</button>
   <button id="btn-pause" class="moire">Pause</button>
   <button id="btn-sight">Sight Pole</button>
   <button id="btn-showtip" class="toggle" data-key="tip">Fingertip</button>
@@ -2182,6 +2197,28 @@ setInterval(() => SooUI.status(), 150);
   const set = open => { p.classList.toggle("open", open); t.textContent = open ? "SOO ▾" : "SOO ▴"; };
   t.addEventListener("click", () => { const o = !p.classList.contains("open"); set(o); slog("panel:soo", { open: o }); });
   set(false);
+}
+
+/* Snap to Orbit: lock the orbit onto the sextant target now and pull the gates home */
+function snapToOrbitNow(via) {
+  const target = SOO.solarAngle - SOO.horizonAngle;
+  SOO.orbitAngle = target; SOO.orbitLocked = true;
+  const r = SOO.radius;
+  if (r > 0.1) { SOO.state = "FAILURE"; sooSetState("RECOVERY", "snap to orbit"); }
+  slog("soo:snap", { via, angle_mrad: S_milli(target), radius_milli: S_milli(r) });
+  moireToast("Snapped to orbit · " + (target * RAD).toFixed(1) + "°");
+}
+document.getElementById("btn-snap").addEventListener("click", () => snapToOrbitNow("button"));
+setInterval(() => document.getElementById("btn-snap").classList.toggle("locked", SOO.orbitLocked), 200);
+
+/* In use: all panels and tabs snap off screen while the pad is touched; back 1.2 s after release */
+{
+  let t = null;
+  const on = () => { clearTimeout(t); document.body.classList.add("in-use"); };
+  const off = () => { clearTimeout(t); t = setTimeout(() => document.body.classList.remove("in-use"), 1200); };
+  canvas.addEventListener("pointerdown", on);
+  canvas.addEventListener("pointerup", off);
+  canvas.addEventListener("pointercancel", off);
 }
 
 /* Ring → audio */
