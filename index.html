@@ -1182,7 +1182,7 @@ function draw() {
   const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w,h)*0.75);
   bg.addColorStop(0, "rgba(22, 16, 38, 1)");
   bg.addColorStop(1, "rgba(5, 7, 12, 1)");
-  ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = bg; ctx.fillRect(-w*3, -h*3, w*7, h*7);   // oversize so the Snap-to-Orbit zoom-out stays seamless
 
   // Sky layers (behind pad)
   if (skyOn && motionActive) {
@@ -2144,6 +2144,60 @@ function drawSOO() {
     el.classList.remove("pulse"); void el.offsetWidth; el.classList.add("pulse"); };
 }
 
+/* Drum kits + bass drum (kick) — fires once per ONSET, shaped by the sextant */
+const DrumKits = {
+  Analog808:   { pitch: 55, decay: 0.45, drive: 0.20, click: 0.10 },
+  DeepHouse:   { pitch: 48, decay: 0.65, drive: 0.35, click: 0.05 },
+  TechnoHard:  { pitch: 60, decay: 0.30, drive: 0.55, click: 0.20 },
+  MinimalSoft: { pitch: 40, decay: 0.80, drive: 0.10, click: 0.02 },
+};
+const DrumPanel = { kit: "Analog808", kick: true, level: 0.8 };
+const _driveCurves = {};
+function driveCurve(d) {
+  const k = Math.round(d * 100); if (_driveCurves[k]) return _driveCurves[k];
+  const n = 1024, c = new Float32Array(n), a = 1 + d * 30;
+  for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(a * x) / Math.tanh(a); }
+  return (_driveCurves[k] = c);
+}
+function playKick(velocity = 1.0) {
+  const kit = DrumKits[DrumPanel.kit];
+  const pitch = Math.max(20, kit.pitch + SOO.axisAngle * 12);            // curvature (axis) → pitch
+  const decay = clamp(kit.decay + SOO.horizonAngle * 0.1, 0.08, 2);      // horizon → decay
+  const drive = clamp(kit.drive + SOO.solarAngle * 0.2, 0, 1);           // solar → distortion
+  const click = kit.click;
+  const out = { type: "kick", kit: DrumPanel.kit, pitch, decay, drive, click, velocity };
+  if (!DrumPanel.kick || !Audio2.ctx) return out;
+  const c = Audio2.ctx, t = c.currentTime + 0.005, v = velocity * DrumPanel.level;
+  const osc = c.createOscillator(), g = c.createGain(), sh = c.createWaveShaper();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(pitch * 4, t);
+  osc.frequency.exponentialRampToValueAtTime(pitch, t + 0.045);           // pitch sweep = the "punch"
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(v, t + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+  sh.curve = driveCurve(drive); sh.oversample = "2x";
+  osc.connect(sh); sh.connect(g); g.connect(Audio2.master);
+  osc.start(t); osc.stop(t + decay + 0.05);
+  if (click > 0) {                                                        // transient click: 4 ms noise burst
+    const len = Math.floor(c.sampleRate * 0.004), buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = c.createBufferSource(), hp = c.createBiquadFilter(), cg = c.createGain();
+    src.buffer = buf; hp.type = "highpass"; hp.frequency.value = 2500; cg.gain.value = click * v * 4;
+    src.connect(hp); hp.connect(cg); cg.connect(Audio2.master); src.start(t);
+  }
+  return out;
+}
+{
+  const base = sooSetState;
+  sooSetState = function (s, why) {
+    const was = SOO.state; base(s, why);
+    if (s === "ONSET" && was !== "ONSET") {
+      const k = playKick(SignalDynamics.dragStrength / 0.6 > 1 ? 1 : SignalDynamics.dragStrength / 0.6);
+      if (DrumPanel.kick) slog("soo:kick", { kit: k.kit, pitch_mhz: S_milli(k.pitch), decay_ms: S_milli(k.decay), drive_milli: S_milli(k.drive) });
+    }
+  };
+}
+
 /* Pull-tab control panel (bottom) */
 const SooUI = {
   build() {
@@ -2154,6 +2208,7 @@ const SooUI = {
       ["Synth engine", SynthEngine, { modulationDepth: [0, 1.5, 0.01] }],
       ["Sextant", SextantPanel, { curvatureMagnification: [0.5, 4, 0.1] }],
       ["Visual", VisualPanel, {}],
+      ["Drum kit", DrumPanel, { level: [0, 1, 0.01] }],
     ];
     const h = [`<div class="soo-state">SOO <span id="soo-st">READY</span> · orbit <span id="soo-orb">—</span></div>`];
     for (const [title, obj, ranges] of sections) {
@@ -2161,7 +2216,7 @@ const SooUI = {
       for (const [k, v] of Object.entries(obj)) {
         const id = `soo-${title[0]}-${k}`;
         if (typeof v === "boolean") h.push(`<label class="row"><span class="k">${k}</span><input type="checkbox" id="${id}" ${v ? "checked" : ""}></label>`);
-        else if (k === "droneWave") h.push(`<label class="row"><span class="k">${k}</span><select id="${id}">${["sine", "triangle", "square", "sawtooth"].map(o => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select></label>`);
+        else if (k === "droneWave" || k === "kit") h.push(`<label class="row"><span class="k">${k}</span><select id="${id}">${(k === "kit" ? Object.keys(DrumKits) : ["sine", "triangle", "square", "sawtooth"]).map(o => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select></label>`);
         else if (k === "eq") h.push(`<div class="row"><span class="k">eq</span></div><div class="eq">${v.map((x, i) => `<input type="range" class="eqb" orient="vertical" id="${id}-${i}" min="0" max="1" step="0.01" value="${x}" title="${SOO_EQ_HZ[i]} Hz">`).join("")}</div>`);
         else if (ranges[k]) { const [a, b, s] = ranges[k];
           h.push(`<div class="row"><span class="k">${k}</span><span class="v" id="${id}-v">${v}</span></div><input type="range" id="${id}" min="${a}" max="${b}" step="${s}" value="${v}">`); }
@@ -2200,13 +2255,59 @@ setInterval(() => SooUI.status(), 150);
 }
 
 /* Snap to Orbit: lock the orbit onto the sextant target now and pull the gates home */
+/* Snap to Orbit = perspective: zoom out to orbit, then a descent gradient home.
+   Phase 1 (0.7 s): view zooms out to 0.3× — the whole walk, leash and orbit in frame.
+   Phase 2 (3.2 s): smooth descent — zoom eases back to 1×, gate origins glide to home
+   along the same curve, drawn as a gradient trail from where you were to home. */
+const Descent = { active: false, t0: 0, from: [], zoom: 1, OUT: 700, DOWN: 3200, MIN: 0.3 };
+const easeInOut = x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
 function snapToOrbitNow(via) {
   const target = SOO.solarAngle - SOO.horizonAngle;
   SOO.orbitAngle = target; SOO.orbitLocked = true;
-  const r = SOO.radius;
-  if (r > 0.1) { SOO.state = "FAILURE"; sooSetState("RECOVERY", "snap to orbit"); }
-  slog("soo:snap", { via, angle_mrad: S_milli(target), radius_milli: S_milli(r) });
-  moireToast("Snapped to orbit · " + (target * RAD).toFixed(1) + "°");
+  Descent.active = true; Descent.t0 = performance.now();
+  Descent.from = [GateF, GateM].map(g => [g.originX, g.originY]);
+  SOO.state = "FAILURE"; sooSetState("RECOVERY", "snap to orbit · descent");
+  slog("soo:snap", { via, angle_mrad: S_milli(target), radius_milli: S_milli(SOO.radius) });
+  moireToast("Orbit · descending home");
+}
+function descentStep(now) {
+  if (!Descent.active) return;
+  const e = now - Descent.t0;
+  if (e < Descent.OUT) { Descent.zoom = 1 - (1 - Descent.MIN) * easeInOut(e / Descent.OUT); return; }
+  const p = Math.min(1, (e - Descent.OUT) / Descent.DOWN), q = easeInOut(p);
+  Descent.zoom = Descent.MIN + (1 - Descent.MIN) * q;
+  [GateF, GateM].forEach((g, i) => { g.originX = Descent.from[i][0] * (1 - q); g.originY = Descent.from[i][1] * (1 - q); });
+  if (p >= 1) { Descent.active = false; Descent.zoom = 1; sooSetState("READY", "home"); slog("soo:home", { ms: Math.round(e) }); }
+}
+{
+  const baseRecovery = recovery;
+  recovery = function () { if (!Descent.active) baseRecovery(); };
+  const baseDraw = draw;
+  draw = function () {
+    const now = performance.now(); descentStep(now);
+    const z = Descent.zoom, w = canvas.width, h = canvas.height, cx = w / 2, cy = h / 2;
+    if (z === 1) return baseDraw();
+    ctx.save();
+    ctx.fillStyle = "rgb(5,7,12)"; ctx.fillRect(0, 0, w, h);
+    ctx.translate(cx, cy); ctx.scale(z, z); ctx.translate(-cx, -cy);
+    const raf = window.requestAnimationFrame; window.requestAnimationFrame = () => 0;   // base draw re-queues itself; we queue once below
+    try { baseDraw(); } finally { window.requestAnimationFrame = raf; }
+    // descent gradient: contour rings + a trail from the start position to home
+    const R = Math.max(w, h) / z;
+    for (let k = 1; k <= 6; k++) {
+      ctx.strokeStyle = `rgba(212,184,255,${0.05 + 0.03 * (6 - k)})`; ctx.lineWidth = 1 / z;
+      ctx.beginPath(); ctx.arc(cx, cy, (R / 6) * k * 0.5, 0, TAU); ctx.stroke();
+    }
+    const [fx, fy] = Descent.from[0];
+    if (Math.hypot(fx, fy) > 1) {
+      const gr = ctx.createLinearGradient(cx + fx, cy + fy, cx, cy);
+      gr.addColorStop(0, "rgba(142,197,255,0.0)"); gr.addColorStop(0.5, "rgba(212,184,255,0.55)"); gr.addColorStop(1, "rgba(124,255,155,0.95)");
+      ctx.strokeStyle = gr; ctx.lineWidth = 3 / z; ctx.beginPath(); ctx.moveTo(cx + fx, cy + fy); ctx.lineTo(cx, cy); ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(124,255,155,0.9)"; ctx.beginPath(); ctx.arc(cx, cy, 5 / z, 0, TAU); ctx.fill();
+    ctx.restore();
+    raf(draw);
+  };
 }
 document.getElementById("btn-snap").addEventListener("click", () => snapToOrbitNow("button"));
 setInterval(() => document.getElementById("btn-snap").classList.toggle("locked", SOO.orbitLocked), 200);

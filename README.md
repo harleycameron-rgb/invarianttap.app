@@ -70,3 +70,9 @@ A bottom pull-tab (**SOO ▴**) opens the SOO control panels: Timing, Signal dyn
 - **Visual**: orbit arc, leash field, solar-band marker, sentinel pulse on each new log entry.
 - Every state change, orbit lock and panel edit is written to the sentinel_dot chain; FAILURE is logged as a rejection.
 - Defaults (dragStrength 0.6, modulationDepth 0.6, quantize off) leave the original pad behaviour unchanged.
+
+### Snap to Orbit (perspective descent)
+Zooms the view out to 0.3× over 0.7 s so the whole walk, leash and orbit are in frame, then runs a 3.2 s eased descent: zoom returns to 1× while both gate origins glide home along the same curve, drawn as contour rings and a gradient trail from where you were to home. Logged as `soo:snap` then `soo:home`.
+
+### Drum kits
+Kick fires once per ONSET (not every frame). Kits: Analog808, DeepHouse, TechnoHard, MinimalSoft. Axis (latitude) → pitch, horizon → decay, solar → drive; 4× pitch sweep in 45 ms, tanh drive, 4 ms high-passed noise click. Routed through the master EQ. Logged as `soo:kick`.
