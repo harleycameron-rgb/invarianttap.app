@@ -56,6 +56,23 @@ and verify with `--key-env SENTINEL_DOT_KEY`. Public-key (Ed25519 / ML-DSA) sign
 pytest -q tests
 ```
 
+### Python head utilities
+
+From the repository root, `invarianttap.head.mint_head(jsonl, block_id, origin=...)`
+creates `<jsonl>.head.json` with schema version 1, the log endpoint, and
+pre-super-block metadata. Origin is required, either explicitly or through
+`INVARIANTTAP_ORIGIN`. An existing head is never overwritten.
+
+```bash
+python -m invarianttap.verify exported.jsonl --expect-seq <N> --expect-hash <hash>
+```
+
+This command checks contiguous zero-based sequence numbers, hash formatting,
+and the final endpoint. Exit codes are 0 for a match, 1 for an endpoint mismatch,
+and 2 for invalid arguments or an unreadable/malformed log. An empty log has
+endpoint `(0, <64 zeroes>)`. It does **not** recompute entry hashes or authenticate
+the chain; use `sentinel_dot verify` above for cryptographic verification.
+
 ## Changes vs. the uploaded build
 
 - Fixed a pre-existing crash: `phase_A` / `phase_B` read `slice[0].x` on an empty slice when `findConvergence` probed plane 0, throwing on every gate tick early in a drag. Both now return 0 for slices shorter than 3 samples.
