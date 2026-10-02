@@ -16,7 +16,7 @@ def test_js_log_verifies_in_python(tmp_path, keyed):
     key = os.urandom(32) if keyed else None
     out, head = make(tmp_path, base64.b64encode(key).decode() if key else None)
     first_entry = json.loads(out.read_text().splitlines()[0])
-    assert first_entry["parameters"]["origin"] == "test-origin"
+    assert first_entry["parameters"]["origin_id"] == "test-origin"
     assert first_entry["parameters"]["stage"] == "pre-super-block"
     ok, issues = verify_log(str(out), key=key, expected_head=head)
     assert ok, issues

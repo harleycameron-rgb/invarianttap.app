@@ -80,7 +80,7 @@
         throw new Error("sentinel_dot: refusing to mint without an origin");
       }
       this.sender = sender; this.round = round;
-      this.origin = origin; this.stage = STAGE;
+      this.originId = origin; this.stage = STAGE;
       this.entries = []; this.lines = [];
       this._hmacKey = null; this._queue = Promise.resolve();
       this.mode = "sha256";
@@ -99,7 +99,7 @@
     }
     headRecord() {
       const [next_seq, hash] = this.head();
-      return { origin: this.origin, stage: this.stage, next_seq, hash };
+      return { origin_id: this.originId, stage: this.stage, next_seq, hash };
     }
     async _hash(body) {
       const data = utf8(body);

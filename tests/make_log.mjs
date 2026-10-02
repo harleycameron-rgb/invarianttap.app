@@ -6,12 +6,12 @@ let refusedWithoutOrigin = false;
 try { new SentinelLog({ sender: "invarianttap" }); } catch { refusedWithoutOrigin = true; }
 if (!refusedWithoutOrigin) throw new Error("mint without origin was not refused");
 const log = new SentinelLog({ sender: "invarianttap", origin: "test-origin" });
-if (log.headRecord().stage !== "pre-super-block" || log.headRecord().origin !== "test-origin") {
+if (log.headRecord().stage !== "pre-super-block" || log.headRecord().origin_id !== "test-origin") {
   throw new Error("head metadata missing origin or stage");
 }
 if (key) await log.setKey(key);
 await log.action("session_start", { app: "invarianttap", lock_version: "4.1.0",
-  origin: log.origin, stage: log.stage });
+  origin_id: log.originId, stage: log.stage });
 await log.action("lock_set", { section: "baseline", key: "OMEGA_LOCAL", value: String(1.42) });
 await log.action("ring", { gate: "forward", id: 1, parent: null, moire_urad: -1234567, coherence_ppm: 812345 });
 await log.reject("sight_pole", "not facing N or S", { az_mdeg: 91234 });

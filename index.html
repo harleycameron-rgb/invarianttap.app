@@ -351,7 +351,7 @@ Sentinel.onAppend = e => {
   if (key) { try { await Sentinel.setKey(key); } catch (e) { console.warn(e); } }
   slog("session_start", { app: "invarianttap", lock_version: LOCK.meta.version,
     lock_id: LOCK.meta.hash, hash_mode: Sentinel.mode,
-    origin: Sentinel.origin, stage: Sentinel.stage });
+    origin_id: Sentinel.originId, stage: Sentinel.stage });
 })();
 
 /* ---------------------------------------------------------------------------

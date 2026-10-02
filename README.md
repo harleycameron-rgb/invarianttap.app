@@ -41,14 +41,14 @@ sentinel_dot anchor stamp invarianttap-<time>.jsonl
 By default entries are plain SHA-256 (accident / edit detection; anyone can recompute). For forgery resistance open the app with a key in the URL fragment (fragments are never sent to a server):
 
 ```
-index.html#key=<output of `sentinel_dot keygen`>
+index.html#origin=<shared-id>&key=<output of `sentinel_dot keygen`>
 ```
 
 and verify with `--key-env SENTINEL_DOT_KEY`. Public-key (Ed25519 / ML-DSA) signing is not done in the browser; re-sign an exported log with `sentinel_dot migrate --signing-key` if auditors need it.
 
 ### Origin and stage
 
-Supply the shared origin when opening the app, for example `index.html#origin=<shared-id>`. InvariantTap refuses to mint a log without a non-empty origin. The origin is recorded in the `session_start` entry and exported head alongside the current `pre-super-block` stage; this stage uses SHA-256 heads. Reconciliation and the future `super-block` stage are out of scope.
+Supply the shared origin when opening the app, for example `index.html#origin=<shared-id>`. InvariantTap refuses to mint a log without a non-empty origin. The origin id is recorded in the `session_start` entry and exported head alongside the current `pre-super-block` stage. This stage uses SHA-256 heads (or HMAC-SHA256 in keyed mode). Reconciliation and the future `super-block` stage are out of scope.
 
 ## Files
 
