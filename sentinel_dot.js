@@ -14,6 +14,7 @@
 (function (root) {
   "use strict";
   const GENESIS_HASH = "0".repeat(64);
+  const STAGE = "pre-super-block";
   const MSG_TYPES = new Set(["action", "rejection", "round_boundary", "malformed_rejection"]);
   const subtle = () => {
     const s = root.crypto && root.crypto.subtle;
@@ -74,8 +75,12 @@
   }
 
   class SentinelLog {
-    constructor({ sender = "invarianttap", round = 0 } = {}) {
+    constructor({ sender = "invarianttap", round = 0, origin } = {}) {
+      if (typeof origin !== "string" || !origin.trim()) {
+        throw new Error("sentinel_dot: refusing to mint without an origin");
+      }
       this.sender = sender; this.round = round;
+      this.origin = origin; this.stage = STAGE;
       this.entries = []; this.lines = [];
       this._hmacKey = null; this._queue = Promise.resolve();
       this.mode = "sha256";
@@ -91,6 +96,10 @@
     head() {
       const n = this.entries.length;
       return n ? [n, this.entries[n - 1].entry_hash] : [0, GENESIS_HASH];
+    }
+    headRecord() {
+      const [next_seq, hash] = this.head();
+      return { origin: this.origin, stage: this.stage, next_seq, hash };
     }
     async _hash(body) {
       const data = utf8(body);

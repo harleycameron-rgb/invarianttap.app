@@ -46,6 +46,10 @@ index.html#key=<output of `sentinel_dot keygen`>
 
 and verify with `--key-env SENTINEL_DOT_KEY`. Public-key (Ed25519 / ML-DSA) signing is not done in the browser; re-sign an exported log with `sentinel_dot migrate --signing-key` if auditors need it.
 
+### Origin and stage
+
+Supply the shared origin when opening the app, for example `index.html#origin=<shared-id>`. InvariantTap refuses to mint a log without a non-empty origin. The origin is recorded in the `session_start` entry and exported head alongside the current `pre-super-block` stage; this stage uses SHA-256 heads. Reconciliation and the future `super-block` stage are out of scope.
+
 ## Files
 
 - `index.html` — the app

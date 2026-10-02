@@ -326,7 +326,18 @@ function lockGet(s,k){ return LOCK[s][k]?.value; }
    Never-list holds: no raw alpha/beta/gamma or accelerometer values are logged.
    Floats are fixed-point strings or scaled ints (schema forbids floats).
    --------------------------------------------------------------------------- */
-const Sentinel = new SentinelDot.SentinelLog({ sender: "invarianttap" });
+const mintParams = new URLSearchParams(location.hash.slice(1));
+const origin = mintParams.get("origin");
+if (!origin || !origin.trim()) {
+  document.querySelector("#permission h1").textContent = "Origin required";
+  document.querySelector("#permission p").textContent =
+    "InvariantTap will not mint a session log without a shared origin. Add #origin=<shared-id> to this page's URL, then reload.";
+  document.querySelector("#permission .small").textContent =
+    "The origin is recorded in the session and exported head. The current stage is pre-super-block.";
+  document.querySelector("#permission button").remove();
+  throw new Error("InvariantTap: refusing to mint without an origin");
+}
+const Sentinel = new SentinelDot.SentinelLog({ sender: "invarianttap", origin });
 const S_milli = x => Math.round(x * 1000);           // scaled-int helpers
 const S_micro = x => Math.round(x * 1e6);
 function slog(type, params, token) { return Sentinel.action(type, params, token).catch(e => console.warn("sentinel_dot", e)); }
@@ -336,10 +347,11 @@ Sentinel.onAppend = e => {
   if (el) el.textContent = `${e.seq + 1} · ${e.entry_hash.slice(0, 8)}`;
 };
 (async () => {
-  const key = new URLSearchParams(location.hash.slice(1)).get("key");   // #key=... (fragment: never sent to a server)
+  const key = mintParams.get("key");   // URL fragment is never sent to a server
   if (key) { try { await Sentinel.setKey(key); } catch (e) { console.warn(e); } }
   slog("session_start", { app: "invarianttap", lock_version: LOCK.meta.version,
-    lock_id: LOCK.meta.hash, hash_mode: Sentinel.mode });
+    lock_id: LOCK.meta.hash, hash_mode: Sentinel.mode,
+    origin: Sentinel.origin, stage: Sentinel.stage });
 })();
 
 /* ---------------------------------------------------------------------------
@@ -1950,7 +1962,7 @@ document.getElementById("btn-log").addEventListener("click", async () => {
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   };
   dl(`invarianttap-${stamp}.jsonl`, Sentinel.toJsonl(), "application/x-ndjson");
-  dl(`invarianttap-${stamp}.head.json`, JSON.stringify({ next_seq, hash, mode: Sentinel.mode,
+  dl(`invarianttap-${stamp}.head.json`, JSON.stringify({ ...Sentinel.headRecord(), mode: Sentinel.mode,
     verify: `sentinel_dot verify invarianttap-${stamp}.jsonl --expect-seq ${next_seq} --expect-hash ${hash}` }, null, 2), "application/json");
   moireToast(chk.ok ? `Log exported · ${next_seq} entries · ${hash.slice(0, 8)}` : `Log self-check FAILED at seq ${chk.seq}`);
 });
