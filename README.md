@@ -12,7 +12,6 @@ Every control action the app takes is appended to an in-memory **sentinel_dot ha
 - `invarianttap-<time>.head.json` — the head `(next_seq, hash)` to anchor externally
 
 ```bash
-pip install "sentinel_dot @ git+https://github.com/harleycameron-rgb/sentinel_dot"
 sentinel_dot verify invarianttap-<time>.jsonl --expect-seq <N> --expect-hash <hash>
 # (optionally) timestamp the head into Bitcoin
 sentinel_dot anchor stamp invarianttap-<time>.jsonl
@@ -50,7 +49,7 @@ and verify with `--key-env SENTINEL_DOT_KEY`. Public-key (Ed25519 / ML-DSA) sign
 
 - `index.html` — the app
 - `sentinel_dot.js` — browser/Node writer for the sentinel_dot v0.2 log format
-- `tests/` — Node writes a log (incl. unicode, a coerced float, a refused raw float, a round boundary); Python `verify_log` must accept it, and must reject tampering, truncation and a wrong key
+- `tests/` — uses `tests/reference_verifier.py`, an independent verifier for the log format, so CI needs no private dependency (the real sentinel_dot is also checked when installed). Node writes a log (incl. unicode, a coerced float, a refused raw float, a round boundary); Python `verify_log` must accept it, and must reject tampering, truncation and a wrong key
 
 ```bash
 pytest -q tests

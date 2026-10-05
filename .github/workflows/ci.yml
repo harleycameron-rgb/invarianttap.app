@@ -9,5 +9,5 @@ jobs:
         with: { node-version: "20" }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install pytest "sentinel_dot @ git+https://github.com/harleycameron-rgb/sentinel_dot"
+      - run: pip install pytest
       - run: pytest -q tests

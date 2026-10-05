@@ -1,7 +1,13 @@
-"""JS writer (sentinel_dot.js) -> Python reference verifier (sentinel_dot.verify_log)."""
+"""JS writer (sentinel_dot.js) -> independent reference verifier; also the real sentinel_dot when installed."""
 import base64, json, os, subprocess, pathlib
 import pytest
-from sentinel_dot.log import verify_log
+import sys
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from reference_verifier import verify_log
+try:
+    from sentinel_dot.log import verify_log as library_verify_log   # optional: private library
+except ImportError:
+    library_verify_log = None
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -37,3 +43,12 @@ def test_wrong_key_rejected(tmp_path):
     out, head = make(tmp_path, base64.b64encode(os.urandom(32)).decode())
     ok, _ = verify_log(str(out), key=os.urandom(32), expected_head=head)
     assert not ok
+
+
+@pytest.mark.skipif(library_verify_log is None, reason="sentinel_dot not installed")
+@pytest.mark.parametrize("keyed", [False, True])
+def test_js_log_verifies_in_library(tmp_path, keyed):
+    key = os.urandom(32) if keyed else None
+    out, head = make(tmp_path, base64.b64encode(key).decode() if key else None)
+    ok, issues = library_verify_log(str(out), key=key, expected_head=head)
+    assert ok, issues

@@ -3,7 +3,8 @@ import json, pathlib, subprocess, sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from verify_patterns import check, derive
-from sentinel_dot.log import verify_log
+sys.path.insert(0, str(ROOT / "tests"))
+from reference_verifier import verify_log
 
 JS = r"""
 const { SentinelLog, derivePattern } = require(process.argv[1]);
