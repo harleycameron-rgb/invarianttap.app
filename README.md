@@ -1,5 +1,5 @@
 # invarianttap.app
-
+https://harleycameron-rgb.github.io/invarianttap.app/
 **Moiré Pad · Sky Fused**, woven to [sentinel_dot](https://github.com/harleycameron-rgb/sentinel_dot).
 
 A single-page instrument: drag on the pad to drive two moiré gates (forward + mirror) that fire relocation rings at phase convergence; with Motion on, the inverted sky tracks the phone's view direction and **Sight Pole** fixes latitude from a sighted angle (no geolocation call).
