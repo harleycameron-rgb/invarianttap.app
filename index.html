@@ -2271,11 +2271,15 @@ function baselineNoise(stepIndex) {
    the fingertip draws into it — the pad is a clock face, 12 o'clock = step 1. */
 const Pattern = [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0];
 function patternStr() { return Pattern.join(""); }
+/* Deterministic shuffle: the new pattern is derived from the sentinel chain head the
+   shuffle entry is appended onto (its prev_log_hash), so the log alone reproduces every groove. */
 function shufflePattern(via) {
-  for (let i = 0; i < Pattern.length; i++) Pattern[i] = Math.random() < 0.3 ? 1 : 0;
-  Pattern[0] = 1;                                           // keep the downbeat so it never goes silent
-  slog("soo:pattern", { via, pattern: patternStr() });
-  PatternUI.render();
+  return Sentinel.append("action", "soo:pattern", async prev => {
+    const pat = await SentinelDot.derivePattern(prev, Pattern.length);
+    for (let i = 0; i < Pattern.length; i++) Pattern[i] = +pat[i];
+    PatternUI.render();
+    return { via, pattern: pat, derive: "v1" };
+  }).catch(e => console.warn("sentinel_dot", e));
 }
 let _drawStep = -1, _drawLogT = null;
 function drawToPattern(clientX, clientY) {

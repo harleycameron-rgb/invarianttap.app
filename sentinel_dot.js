@@ -102,8 +102,11 @@
       const p = this._queue.then(async () => {
         if (!MSG_TYPES.has(msg_type)) throw new Error(`unknown msg_type: ${msg_type}`);
         if (!action_type) throw new Error("action_type must be non-empty");
-        checkValue(parameters, "parameters");
         const [seq, prev] = this.head();
+        // parameters may be a function of the chain head, evaluated inside the queue, so the
+        // value is bound to exactly this entry's prev_log_hash (used for deterministic derivations)
+        if (typeof parameters === "function") parameters = await parameters(prev, seq);
+        checkValue(parameters, "parameters");
         const e = { seq, msg_type, sender: this.sender, round: this.round, action_type,
                     parameters, permission_token, prev_log_hash: prev };
         e.entry_hash = await this._hash(canonicalJson(e));
@@ -135,7 +138,14 @@
     }
   }
 
-  const api = { SentinelLog, canonicalJson, jsonable, GENESIS_HASH };
+  /* Deterministic 16-step pattern from a chain hash (derive v1):
+     d = SHA-256(ascii(prev_log_hash) || "|soo:pattern|v1"); step i on iff d[i] < 77 (~30%); step 0 always on. */
+  async function derivePattern(prevHash, steps = 16) {
+    const d = new Uint8Array(await subtle().digest("SHA-256", utf8(prevHash + "|soo:pattern|v1")));
+    let out = ""; for (let i = 0; i < steps; i++) out += (i === 0 || d[i] < 77) ? "1" : "0";
+    return out;
+  }
+  const api = { SentinelLog, canonicalJson, jsonable, GENESIS_HASH, derivePattern };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.SentinelDot = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

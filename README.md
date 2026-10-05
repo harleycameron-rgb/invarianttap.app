@@ -84,3 +84,20 @@ Kick fires once per ONSET (not every frame). Kits: Analog808, DeepHouse, TechnoH
 - **Fingertip draw**: with Fingertip on, the pad is a clock face — drawing around it writes steps (12 o'clock = step 1, clockwise). The 16-step ring is drawn on the pad with the playhead lit.
 - **Baseline noise**: a quantised high-passed noise tick every step, amplitude following |sin| over `baselineQuantise` steps.
 - **Volume dials**: kick (onset), noise, pattern — drag up/down or scroll.
+
+### Deterministic pattern shuffle
+Every shuffle (orbital snap, Snap to Orbit, shuffle button) derives its pattern from the sentinel chain head it is appended onto, not from `Math.random`:
+
+```
+d = SHA-256( ascii(prev_log_hash) + "|soo:pattern|v1" )
+step i on  iff  i == 0  or  d[i] < 77      (~30% density, downbeat kept)
+```
+
+The derivation runs inside the log's append queue, so the pattern is bound to exactly that entry's `prev_log_hash` even when rings and other events are being logged at the same moment. The entry records `{via, pattern, derive: "v1"}`.
+
+Check an exported log:
+```bash
+sentinel_dot verify invarianttap-<time>.jsonl --expect-seq N --expect-hash H   # chain integrity
+python tools/verify_patterns.py invarianttap-<time>.jsonl                      # every shuffle re-derives
+```
+Because each pattern depends on everything logged before it, the same session history always yields the same grooves, and an edited pattern is caught. Hand-edited steps (grid taps, fingertip drawing, clear) are logged as plain entries without `derive`.
